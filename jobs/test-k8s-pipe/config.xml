@@ -1,0 +1,125 @@
+<?xml version='1.1' encoding='UTF-8'?>
+<flow-definition plugin="workflow-job@2.37">
+  <actions/>
+  <description></description>
+  <keepDependencies>false</keepDependencies>
+  <properties>
+    <hudson.plugins.jira.JiraProjectProperty plugin="jira@3.0.13"/>
+  </properties>
+  <definition class="org.jenkinsci.plugins.workflow.cps.CpsFlowDefinition" plugin="workflow-cps@2.80">
+    <script>
+import java.text.SimpleDateFormat
+
+ecRegistry = &quot;https://758637906269.dkr.ecr.us-east-1.amazonaws.com/connector-dev&quot;
+ecr_repo = &quot;758637906269.dkr.ecr.us-east-1.amazonaws.com/connector-dev&quot;
+ecr_tag=&quot;connector-dev&quot;
+project = &apos;hello-world&apos;  
+branch = &quot;master&quot;    
+gitCreds = &apos;cred7864&apos;      
+build_dir = &apos;/var/lib/jenkins/node/workspace/test-k8s-pipe/target&apos;  
+execute_dir= &apos;/var/lib/jenkins/node/workspace/test-k8s-pipe&apos;
+docker_files = &quot;/var/lib/jenkins/node/workspace/test-k8s-pipe/Dockerfiles&quot;
+deploy_dir = &quot;hello-artifactory/${env.BUILD_NUMBER}&quot;
+s3_cmd = &quot;aws s3 cp&quot;
+war=&quot;mavenproject1-1.0-SNAPSHOT.war&quot;
+inventory= &apos;/var/lib/jenkins/node/workspace/test-k8s-pipe/k8s/inv&apos; 
+playbook= &apos;/var/lib/jenkins/node/workspace/test-k8s-pipe/k8s/tom-k8s.yml&apos; 
+
+
+
+
+
+
+
+
+def checkout() 
+{
+   git url: &quot;https://github.com/jenkins-ops-org/${project}.git&quot;, branch: &quot;${branch}&quot;, credentialsId: &quot;${gitCreds}&quot;
+       
+   		
+}
+
+def maven_build() 
+{
+		dir(&quot;.&quot;) {
+		    withEnv([&quot;MAVEN=/opt/apps/maven/bin&quot;, &quot;PATH=${PATH}:/opt/apps/maven/bin&quot;]) {
+		        sh &quot;mvn clean package&quot;   
+		    }
+		}
+}
+
+
+def s3() {
+   echo &quot;${env.BUILD_NUMBER}&quot;
+   sh  &quot;${s3_cmd} ${build_dir}/${war} s3://${deploy_dir}/${war}&quot;
+   sh  &quot;cp -r ${build_dir}/${war} ${docker_files}&quot;
+}
+
+
+def docker_build() 
+{
+   sh &quot;docker build -t ${ecr_repo}:tom-${env.BUILD_NUMBER} --pull=true --file=${docker_files}/tomcat-dockerfile ${docker_files}&quot;
+}
+
+
+def docker_push()
+
+{
+    sh &quot;docker push ${ecr_repo}:tom-${env.BUILD_NUMBER}&quot;
+}
+
+
+def pod_deploy()
+{
+    
+    sh &quot;ansible-playbook -i ${inventory} ${playbook} --extra-vars tom=${ecr_repo}:tom-${env.BUILD_NUMBER}&quot;
+
+}
+
+
+
+
+
+
+try{
+		
+	
+		node(&apos;ec2&apos;) 
+       {
+				
+				
+				stage(&apos;Checkout&apos;) {
+				    checkout()
+				}
+	 			
+			    stage(&apos;Maven Build&apos;) {
+					maven_build()  
+				}
+				
+				stage(&apos;Copy to Artifacts&apos;) {
+						s3()
+				}
+		        stage(&quot;Docker Build&quot;) {
+						docker_build()
+				}	
+				
+				stage(&quot;Docker Push&quot;) {
+						docker_push()
+				}	
+				
+				stage(&quot;Deploy On K8s&quot;) {
+					    pod_deploy()
+				}	
+				
+      
+    }
+} finally {
+		if (currentBuild.result == &apos;SUCCESS&apos;) {
+				stage(&quot;Announce&quot;) {}
+		}
+}</script>
+    <sandbox>true</sandbox>
+  </definition>
+  <triggers/>
+  <disabled>false</disabled>
+</flow-definition>
